@@ -262,7 +262,10 @@ class ChatSessionWithTracing:
                         feedback = f"⚠️ Content flagged: {safety_message}"
                         response = "[This content was flagged by moderation and not sent to the AI. Please try again.]"
 
-                        span.set_attribute("feedback", feedback)
+                        # Emit a dedicated "feedback" span recording the flagged content
+                        with tracer.start_as_current_span("feedback") as feedback_span:
+                            feedback_span.set_attribute("feedback.content", feedback)
+                            feedback_span.set_attribute("feedback.flagged", True)
 
                         return response, past_messages, feedback
 
@@ -285,6 +288,11 @@ class ChatSessionWithTracing:
                                 response = (
                                     "[This content was flagged by moderation and not sent to the AI. Please try again.]"
                                 )
+
+                                # Emit a dedicated "feedback" span recording the flagged content
+                                with tracer.start_as_current_span("feedback") as feedback_span:
+                                    feedback_span.set_attribute("feedback.content", feedback)
+                                    feedback_span.set_attribute("feedback.flagged", True)
 
                                 return response, past_messages, feedback
 
