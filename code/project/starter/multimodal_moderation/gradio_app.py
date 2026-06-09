@@ -165,7 +165,8 @@ def check_content_safety(*, text: str | None = None, media: str | None = None) -
     Returns:
         Tuple of (is_safe, feedback_message, mime_type)
     """
-    # Create a tracing span for this moderation check
+    # Create a tracing span for this moderation check (renamed below once we
+    # know the actual content type, e.g. "moderate_image")
     with tracer.start_as_current_span("moderate_text") as span:
 
         # Route to the appropriate moderation function
@@ -205,7 +206,9 @@ class ChatSessionWithTracing:
 
     def __init__(self):
         self.session_id = str(uuid.uuid4())
-        # Create a root span for the entire conversation
+        # Create a root span for the entire conversation.
+        # NOTE: start_span (not start_as_current_span) keeps this span open across
+        # multiple chat turns; it is closed explicitly in end_conversation().
         self.conversation_span = tracer.start_span(
             "conversation",
             attributes={"session.id": self.session_id},
@@ -230,8 +233,8 @@ class ChatSessionWithTracing:
         Returns:
             Tuple of (response_text, updated_messages, feedback_text)
         """
-        # Create a tracing span for this chat turn
-
+        # Create a tracing span for this chat turn, as a child of the
+        # conversation span so Phoenix groups all turns of a session together.
         with tracer.start_as_current_span(
             "chat_turn",
             context=trace.set_span_in_context(self.conversation_span),
@@ -300,6 +303,7 @@ class ChatSessionWithTracing:
                             with open(file_path, "rb") as f:
                                 file_bytes = f.read()
                             
+                            # Include the media in the prompt to the AI customer
                             prompt_parts.append(BinaryContent(data=file_bytes, media_type=mime_type))
 
                         except ValueError as e:
@@ -311,6 +315,10 @@ class ChatSessionWithTracing:
             # All content passed moderation - send to AI customer
             try:
                 with tracer.start_as_current_span("llm_customer"):
+
+                    # GEMINI CALL: Send prompt to AI agent that plays the customer role.
+                    # past_messages is passed as message_history so the agent keeps
+                    # the context of the conversation across turns.
                     result = await customer_agent.run(
                         prompt_parts,
                         message_history=past_messages,
@@ -393,6 +401,9 @@ def create_chat_interface() -> gr.Blocks:
                         placeholder="👋 Start by greeting the customer or introducing yourself. The AI customer will respond with their complaint.",
                         height="75vh",
                     ),
+                    # Pydantic AI's message history flows through past_messages_state
+                    # (in and out), and the moderation feedback returned by
+                    # chat_with_gemini is routed directly into feedback_display.
                     additional_inputs=[past_messages_state],
                     additional_outputs=[past_messages_state, feedback_display],
                 )
