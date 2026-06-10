@@ -267,7 +267,7 @@ class ChatSessionWithTracing:
 
                         # Emit a dedicated "feedback" span recording the flagged content
                         with tracer.start_as_current_span("feedback") as feedback_span:
-                            feedback_span.set_attribute("feedback.content", feedback)
+                            feedback_span.set_attribute("feedback", feedback)
                             feedback_span.set_attribute("feedback.flagged", True)
 
                         return response, past_messages, feedback
@@ -294,7 +294,7 @@ class ChatSessionWithTracing:
 
                                 # Emit a dedicated "feedback" span recording the flagged content
                                 with tracer.start_as_current_span("feedback") as feedback_span:
-                                    feedback_span.set_attribute("feedback.content", feedback)
+                                    feedback_span.set_attribute("feedback", feedback)
                                     feedback_span.set_attribute("feedback.flagged", True)
 
                                 return response, past_messages, feedback
@@ -325,8 +325,14 @@ class ChatSessionWithTracing:
                     )
 
                 logger.info(f"Response generated ({len(result.all_messages())} messages in history)")
-                return result.output, result.all_messages(), safety_message
 
+                # Emit a dedicated "feedback" span for the clean (non-flagged) state as well,
+                # so a "feedback" span is present whenever feedback is surfaced to the user.
+                with tracer.start_as_current_span("feedback") as feedback_span:
+                    feedback_span.set_attribute("feedback", safety_message or "Content is clean.")
+                    feedback_span.set_attribute("feedback.flagged", False)
+
+                return result.output, result.all_messages(), safety_message
             except Exception as e:
                 logger.error(f"Error in chat_with_gemini: {str(e)}")
                 raise gr.Error(
